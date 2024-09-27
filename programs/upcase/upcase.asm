@@ -30,9 +30,9 @@ section .text
   upcase_next:
     ; check if current character is a-z
     cmp byte [rbx], 97
-    jl upcase_next_skip_current
+    jl skip_current_character
     cmp byte [rbx], 122
-    jg upcase_next_skip_current
+    jg skip_current_character
 
     ; make character upper case
     sub byte [rbx], 32
