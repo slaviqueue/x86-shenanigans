@@ -1,7 +1,7 @@
 ; a program that outputs an uppercase version of a hardcoded string
 
 section .data
-  greeting: db `hey there, I'm going to make all chars upcase, observe:\n`, 
+  greeting: db `hey there, I'm going to make all chars upcase, observe:\n`, 0
   greeting_len: equ $ - greeting
   original_str: db `it's like a jungle sometimes, it makes me wonder how I keep from going under\n`, 0
   original_str_len: equ $ - original_str
