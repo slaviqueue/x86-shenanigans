@@ -1,3 +1,5 @@
+set -e
+
 program=$1
 
 if [ -z "$program" ]; then

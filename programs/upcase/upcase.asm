@@ -1,55 +1,51 @@
-; a program that outputs an uppercase version of a hardcoded string
+; a program that takes a string as an input, and produces an uppercased version
+; of that string
 
 section .data
-  greeting: db `hey there, I'm going to make all chars upcase, observe:\n`, 0
-  greeting_len: equ $ - greeting
-  original_str: db `it's like a jungle sometimes, it makes me wonder how I keep from going under\n`, 0
-  original_str_len: equ $ - original_str
+	stdin: equ 0
+	stdout: equ 1
+
+section .bss
+	buf: resb 1
 
 global _start
+
 section .text
-  _start:
-    ; print greeting
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, greeting
-    mov rdx, greeting_len
-    syscall
+	_start:
 
-    ; print original string
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, original_str
-    mov rdx, original_str_len
-    syscall
+	read_character:
+		; read one character from stdin
+		mov rax, 0
+		mov rdi, stdin
+		mov rsi, buf
+		mov rdx, 1
+		syscall
 
-    ; make a upcase string
-    mov rax, original_str_len
-    mov rbx, original_str
+		; if out of bytes - exit
+		cmp rax, 0
+		je exit
 
-  upcase_next:
-    ; check if current character is a-z
-    cmp byte [rbx], 97
-    jl skip_current_character
-    cmp byte [rbx], 122
-    jg skip_current_character
+		; check if we've read a lowercase letter
+		cmp byte [buf], 'a'
+		jl write_character
+		cmp byte [buf], 'z'
+		jg write_character
 
-    ; make character upper case
-    sub byte [rbx], 32
+		; make it uppercase
+		sub byte [buf], 32
 
-  skip_current_character:
-    inc rbx
-    dec rax
-    jnz upcase_next
+	write_character:
+		; write the character to stdout
+		mov rax, 1
+		mov rdi, stdout
+		mov rsi, buf
+		mov rdx, 1
+		syscall
 
-    ; print upcased string string
-    mov rax, 1
-    mov rdi, 1
-    mov rsi, original_str
-    mov rdx, original_str_len
-    syscall
+		jmp read_character
 
-    ; gracefully exit
-    mov rax, 60
-    mov rdi, 0
-    syscall
+	exit:
+		; exit
+		mov rax, 60
+		mov rdi, 0
+		syscall
