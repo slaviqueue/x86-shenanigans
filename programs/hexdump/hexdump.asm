@@ -39,7 +39,7 @@ section .text
     ; remember how many bytes we have read
     mov bytes_read_r, rax
 
-    ; if we've run out of output, exit
+    ; if we've run out of input, exit
     cmp rax, 0
     je exit
   
