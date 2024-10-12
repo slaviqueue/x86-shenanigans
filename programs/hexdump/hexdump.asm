@@ -43,8 +43,6 @@ section .text
     cmp rax, 0
     je exit
   
-  process_buffer:
-    ; the index of current byte
     mov current_byte_index_r, 0
 
   process_byte:
