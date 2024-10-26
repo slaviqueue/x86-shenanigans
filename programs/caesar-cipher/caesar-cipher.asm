@@ -45,6 +45,15 @@ extern read
   pop rbp
 %endmacro
 
+; Push anything 8 bytes wide to align the stack to 16 bytes
+%macro push_align_8 0
+  push r8
+%endmacro
+
+%macro pop_align_8 0
+  pop r8
+%endmacro
+
 ; Source code
 section .text
   global main
@@ -55,6 +64,7 @@ section .text
 
     ; Backup registers
     push r14
+    push_align_8
 
     ; Check the "command" argument and store the corresponding procedure in rax
     call parse_arguments
@@ -86,6 +96,7 @@ section .text
       mov rax, 1
 
     .exit:
+      pop_align_8
       pop r14
       function_epilogue
       ret
@@ -151,6 +162,7 @@ section .text
     push rdi
     push rsi
     push rdx
+    push_align_8
 
     ; Read a buffer from stdin
     mov rdi, std_in
@@ -159,6 +171,7 @@ section .text
     call read
 
     ; Restore registers and return
+    pop_align_8
     pop rdx
     pop rsi
     pop rdi
@@ -285,6 +298,7 @@ section .text
     push rax
     push rdx
     push rsi
+    push_align_8
 
     ; Write buffer to stdout
     mov rdx, rdi
@@ -293,6 +307,7 @@ section .text
     call write
 
     ; Restore registers
+    pop_align_8
     pop rsi
     pop rdx
     pop rax
@@ -309,12 +324,14 @@ section .text
 
     ; Backup registers
     push rsi
+    push_align_8
 
     mov rsi, rdi
     mov rdi, command_line_arguments_error
     mov rax, 0
     call printf
 
+    pop_align_8
     pop rsi
     function_epilogue
     ret
