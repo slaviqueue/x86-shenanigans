@@ -6,11 +6,6 @@
 ; gcc, not with ld:
 ; LD_FLAGS=-no-pie LINK_WITH=gcc ./build.sh programs/caesar-cipher
 
-; Syscalls
-%define sys_read 0
-%define sys_write 1
-%define sys_exit 60
-
 ; File descriptors
 %define std_in 0
 %define std_out 1
@@ -38,6 +33,17 @@ section .bss
 
 extern printf
 extern strcmp
+extern write
+extern read
+
+%macro function_prologue 0
+  push rbp
+  mov rbp, rsp
+%endmacro
+
+%macro function_epilogue 0
+  pop rbp
+%endmacro
 
 ; Source code
 section .text
@@ -45,8 +51,7 @@ section .text
 
   ; The entry point
   main:
-    push rbp
-    mov rbp, rsp
+    function_prologue
 
     ; Backup registers
     push r14
@@ -65,7 +70,7 @@ section .text
       je .exit ; If we read 0 bytes - exit
       
       mov rdi, rax ; Move the amount of bytes read to rdi
-      call r14 ; Encryp of decrypt
+      call r14 ; Encrypt of decrypt
 
       ; Write the output to stdout
       mov rdi, rax
@@ -82,7 +87,7 @@ section .text
 
     .exit:
       pop r14
-      pop rbp
+      function_epilogue
       ret
 
   ; A procedure that figures out if we have encrypt of decrypt the input
@@ -95,6 +100,8 @@ section .text
   ;   exit with usage
   ; Modifies: none         
   parse_arguments:
+    function_prologue
+
     ; Backup registers
     push rdi
     push rsi
@@ -129,6 +136,7 @@ section .text
       ; Restore registers
       pop rsi
       pop rdi
+      function_epilogue
       ret
 
   ; A procedure to read the input buffer
@@ -137,22 +145,24 @@ section .text
   ; Output: rax - number of characters read
   ; Modifies: buffer
   read_buffer:
+    function_prologue
+
     ; Backup registers
     push rdi
     push rsi
     push rdx
 
     ; Read a buffer from stdin
-    mov rax, sys_read
     mov rdi, std_in
     mov rsi, databuffer
     mov rdx, bufsize
-    syscall
+    call read
 
     ; Restore registers and return
     pop rdx
     pop rsi
     pop rdi
+    function_epilogue
     ret
 
   ; A procedure that encrypts the input buffer
@@ -161,6 +171,8 @@ section .text
   ; Output: none
   ; Modifies: buffer
   encrypt:
+    function_prologue
+
     ; Backup registers
     push rcx
     push rax
@@ -188,6 +200,7 @@ section .text
     ; Restore registers
     pop rax
     pop rcx
+    function_epilogue
     ret
 
   ; A procedure that decrypts the input buffer
@@ -196,6 +209,8 @@ section .text
   ; Output: none
   ; Modifies: buffer
   decrypt:
+    function_prologue
+
     ; Backup registers
     push rcx
     push rax
@@ -220,6 +235,7 @@ section .text
     ; Restore registers
     pop rax
     pop rcx
+    function_epilogue
     ret
 
   ; A procedure that checks if a given character is either a lower or an upper
@@ -232,8 +248,11 @@ section .text
   ; Output: rax - 1 if character *is* a letter, 0 otherwise
   ; Modifies: none
   is_letter:
+    function_prologue
+
     %macro return_status 1
       mov rax, %1
+      function_epilogue
       ret
     %endmacro
 
@@ -260,22 +279,24 @@ section .text
   ; Output: none
   ; Modifies: none
   write_buffer:
+    function_prologue
+
     ; Backup registers
     push rax
     push rdx
     push rsi
 
     ; Write buffer to stdout
-    mov rax, sys_write
     mov rdx, rdi
     mov rdi, std_out
     mov rsi, databuffer
-    syscall
+    call write
 
     ; Restore registers
     pop rsi
     pop rdx
     pop rax
+    function_epilogue
     ret
 
   ; Print the usage message
@@ -284,6 +305,8 @@ section .text
   ; Output: none
   ; Modified: not relevant
   print_usage:
+    function_prologue
+
     ; Backup registers
     push rsi
 
@@ -293,4 +316,5 @@ section .text
     call printf
 
     pop rsi
+    function_epilogue
     ret
