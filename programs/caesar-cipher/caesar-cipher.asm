@@ -1,6 +1,10 @@
 ; This is a program that encrypts the data it receives from the stdin with the
 ; caeser cipher. It only encrypts letters. The number of places each letter is
 ; being shifter by is specified by the "shift_places" macro.
+; 
+; Note: since this program uses functions from libc, we have to link it with
+; gcc, not with ld:
+; LD_FLAGS=-no-pie LINK_WITH=gcc ./build.sh programs/caesar-cipher
 
 ; Syscalls
 %define sys_read 0
@@ -16,16 +20,58 @@
 %define bufsize 16
 %define shift_places 3
 
+; command-line argument offsets
+%define arg_executable 1
+%define arg_command 2
+
+; Initialized data
+section .data
+  command_encrypt: db "encrypt", 0
+  command_decrypt: db "decrypt", 0
+  command_line_arguments_error: db "Usage: %s {encrypt|decrypt}", 10, 0
+
 ; Uninitialized data
 section .bss
   buffer: resb bufsize
 
+extern printf
+extern strcmp
+
 ; Source code
 section .text
-  global _start
+  global main
 
   ; The entry point
-  _start:
+  main:
+    push rbp
+    mov rbp, rsp
+
+    ; backup inputs
+    mov r12, rdi ; backup the arguments count in r12
+    mov r13, rsi ; backup the arguments pointer in r13
+
+    ; validate 
+    cmp r12, 2
+    jne .exit_with_usage
+
+    ; check the "command" argument and store the corresponding procedure in r14
+    .check_command_encrypt:
+      mov rdi, [r13 + 8]
+      mov rsi, command_encrypt
+      call strcmp
+      cmp rax, 0
+      jne .check_command_decrypt
+      mov r14, encrypt
+      jmp .read_and_process_input
+
+    .check_command_decrypt:
+      mov rdi, [r13 + 8]
+      mov rsi, command_decrypt
+      call strcmp
+      cmp rax, 0
+      jne .exit_with_usage
+      mov r14, decrypt
+
     .read_and_process_input:
     call read_buffer
 
@@ -33,8 +79,8 @@ section .text
     cmp rax, 0
     je .exit
 
-    ; Encrypt and write the output to stdout
-    call encrypt
+    ; Encrypt or decrypt and write the output to stdout
+    call r14
 
     ; Write the output to stdout
     mov rbx, rax
@@ -43,8 +89,16 @@ section .text
     ; Read next input chunk
     jmp .read_and_process_input
 
+    .exit_with_usage:
+      mov rsi, [r13]
+      call print_usage
+      mov rax, 1
+
     .exit:
-    call exit
+      mov rax, 0
+
+      pop rbp
+      ret
 
   ; A procedure to read the input buffer
   ; 
@@ -109,6 +163,37 @@ section .text
     pop rcx
     ret
 
+  decrypt:
+    push rcx
+    push r8
+
+    mov rcx, rax
+
+    .decrypt_byte:
+      mov r8b, [buffer + rcx - 1]
+
+      .check_if_lowercase_letter:
+        cmp r8b, 'a'
+        jb .check_if_uppercase_letter
+        cmp r8b, 'z'
+        ja .check_if_uppercase_letter
+        jmp .decrypt
+      
+      .check_if_uppercase_letter:
+        cmp r8b, 'A'
+        jb .skip_byte
+        cmp r8b, 'Z'
+        ja .skip_byte
+        
+      .decrypt:
+        sub byte [buffer + rcx - 1], shift_places
+      .skip_byte:
+        loop .decrypt_byte
+    
+    pop r8
+    pop rcx
+    ret
+
   ; A procedure that writes the buffer to stdout
   ;
   ; Input: rbx - the amount of characters to write
@@ -129,12 +214,13 @@ section .text
     pop rax
     ret
 
-  ; Exit the program
-  ;
-  ; Input: none
+  ; Print the usage message
+  ; Input:
+  ;   - rsi - null-terminated string which contains the name of executable
   ; Output: none
-  ; Modifies: who cares
-  exit:
-    mov rax, sys_exit
-    mov rdi, exit_success
-    syscall
+  ; Modified: not relevant
+  print_usage:
+    mov rdi, command_line_arguments_error
+    mov rax, 0
+    call printf
+    ret
