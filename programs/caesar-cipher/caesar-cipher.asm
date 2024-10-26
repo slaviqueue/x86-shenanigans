@@ -16,13 +16,8 @@
 %define std_out 1
 
 ; Program-specific constants
-%define exit_success 0
 %define bufsize 16
 %define shift_places 3
-
-; command-line argument offsets
-%define arg_executable 1
-%define arg_command 2
 
 ; Initialized data
 section .data
@@ -32,7 +27,14 @@ section .data
 
 ; Uninitialized data
 section .bss
-  buffer: resb bufsize
+  ; Had to rename this from "buffer" to "databuffer", because when debugging
+  ; with gdb, it sees all "buffer"'s marked as static from libc files, and if we
+  ; try to do a "print buffer" it picks up a random "buffer" symbol from the
+  ; libc.
+  ;
+  ; Related issue:
+  ; https://stackoverflow.com/questions/39220351/gdb-behaves-differently-for-symbols-in-the-bss-vs-symbols-in-data
+  databuffer: resb bufsize
 
 extern printf
 extern strcmp
@@ -46,58 +48,87 @@ section .text
     push rbp
     mov rbp, rsp
 
-    ; backup inputs
-    mov r12, rdi ; backup the arguments count in r12
-    mov r13, rsi ; backup the arguments pointer in r13
+    ; Backup registers
+    push r14
 
-    ; validate 
-    cmp r12, 2
-    jne .exit_with_usage
-
-    ; check the "command" argument and store the corresponding procedure in r14
-    .check_command_encrypt:
-      mov rdi, [r13 + 8]
-      mov rsi, command_encrypt
-      call strcmp
-      cmp rax, 0
-      jne .check_command_decrypt
-      mov r14, encrypt
-      jmp .read_and_process_input
-
-    .check_command_decrypt:
-      mov rdi, [r13 + 8]
-      mov rsi, command_decrypt
-      call strcmp
-      cmp rax, 0
-      jne .exit_with_usage
-      mov r14, decrypt
+    ; Check the "command" argument and store the corresponding procedure in rax
+    call parse_arguments
+    cmp rax, 0 ; Check the result of parse_arguments
+    je .exit_with_usage ; If it returned a null pointer - print the ussage
+                        ; message and exit
+    mov r14, rax ; Store the command handler in r14
 
     .read_and_process_input:
-    call read_buffer
+      call read_buffer
 
-    ; Exit if out of input
-    cmp rax, 0
-    je .exit
+      cmp rax, 0 ; Check how many bytes we've read
+      je .exit ; If we read 0 bytes - exit
+      
+      mov rdi, rax ; Move the amount of bytes read to rdi
+      call r14 ; Encryp of decrypt
 
-    ; Encrypt or decrypt and write the output to stdout
-    call r14
+      ; Write the output to stdout
+      mov rdi, rax
+      call write_buffer
 
-    ; Write the output to stdout
-    mov rbx, rax
-    call write_buffer
-
-    ; Read next input chunk
-    jmp .read_and_process_input
+      ; Read next input chunk
+      jmp .read_and_process_input
 
     .exit_with_usage:
-      mov rsi, [r13]
+      ; Print the usage with the name of the executable
+      mov rsi, [rsi]
       call print_usage
       mov rax, 1
 
     .exit:
+      pop r14
+      pop rbp
+      ret
+
+  ; A procedure that figures out if we have encrypt of decrypt the input
+  ; Input:
+  ;  - rsi - a number of arguments
+  ;  - rdi - a pointer to the array of arguments
+  ; Output:
+  ;   - rax - a pointer to procedure that should be run on the input buffer. If
+  ;   rax contains 0, then the command argument was not valid, and we should
+  ;   exit with usage
+  ; Modifies: none         
+  parse_arguments:
+    ; Backup registers
+    push rdi
+    push rsi
+
+    ; Check if the number of arguments is equal to 2, fail otherwise
+    cmp rdi, 2
+    jne .fail_to_parse
+
+    ; Put the first command line argument after executable to rdi
+    mov rdi, [rsi + 8]
+
+    .check_command_encrypt:
+      mov rsi, command_encrypt
+      call strcmp
+      cmp rax, 0
+      jne .check_command_decrypt
+      mov rax, encrypt
+      jmp .return
+
+    .check_command_decrypt:
+      mov rsi, command_decrypt
+      call strcmp
+      cmp rax, 0
+      jne .fail_to_parse
+      mov rax, decrypt
+      jmp .return
+
+    .fail_to_parse:
       mov rax, 0
 
-      pop rbp
+    .return:
+      ; Restore registers
+      pop rsi
+      pop rdi
       ret
 
   ; A procedure to read the input buffer
@@ -109,118 +140,157 @@ section .text
     ; Backup registers
     push rdi
     push rsi
+    push rdx
 
     ; Read a buffer from stdin
     mov rax, sys_read
     mov rdi, std_in
-    mov rsi, buffer
+    mov rsi, databuffer
     mov rdx, bufsize
     syscall
 
     ; Restore registers and return
+    pop rdx
     pop rsi
     pop rdi
     ret
 
   ; A procedure that encrypts the input buffer
   ;
-  ; Input: rax - the number of bytes in the buffer we have to encrypt
+  ; Input: rdi - the number of bytes in the buffer we have to encrypt
   ; Output: none
   ; Modifies: buffer
   encrypt:
-    ; backup registers
+    ; Backup registers
     push rcx
-    push r8
+    push rax
 
-    mov rcx, rax
+    ; Set the counter register
+    mov rcx, rdi
 
-    ; Enrypt current byte, only if it's a letter. The condition is logically
-    ; equivalent to the following C expression:
-    ; (r8b >= 'a' && r8b <= 'z') || (r8b >= 'A' && r8b <= 'Z')
+    ; Enrypt current byte, only if it's a letter. 
     .encrypt_byte:
-      mov r8b, byte [buffer + rcx - 1]
+      ; Here we need to put a byte from memory to the edi. We cannot, however
+      ; refer directly to the lower 8 bits of the rdi, so we have to do it
+      ; through the intermediate rax with al.
+      xor rax, rax
+      mov al, byte [databuffer + rcx - 1]
+      mov rdi, rax
+      call is_letter
 
-      .check_if_lowercase_letter:
-        cmp r8b, 'a'
-        jl .check_if_uppercase_letter
-        cmp r8b, 'z'
-        ja .check_if_uppercase_letter
-        jmp .encrypt
+      cmp rax, 0
+      je .skip_byte
+      add byte [databuffer + rcx - 1], shift_places
 
-      .check_if_uppercase_letter:
-        cmp r8b, 'A'
-        jl .skip_byte
-        cmp r8b, 'Z'
-        ja .skip_byte
-
-      .encrypt:
-        add byte [buffer + rcx - 1], shift_places
       .skip_byte:
         loop .encrypt_byte
     
-    ; Restore_registers
-    pop r8
+    ; Restore registers
+    pop rax
     pop rcx
     ret
 
+  ; A procedure that decrypts the input buffer
+  ;
+  ; Input: rdi - the number of bytes in the buffer we have to decrypt
+  ; Output: none
+  ; Modifies: buffer
   decrypt:
+    ; Backup registers
     push rcx
-    push r8
+    push rax
 
-    mov rcx, rax
+    ; Set the counter register
+    mov rcx, rdi
 
+    ; Enrypt current byte, only if it's a letter. 
     .decrypt_byte:
-      mov r8b, [buffer + rcx - 1]
+      xor rax, rax
+      mov al, byte [databuffer + rcx - 1]
+      mov rdi, rax
+      call is_letter
 
-      .check_if_lowercase_letter:
-        cmp r8b, 'a'
-        jb .check_if_uppercase_letter
-        cmp r8b, 'z'
-        ja .check_if_uppercase_letter
-        jmp .decrypt
-      
-      .check_if_uppercase_letter:
-        cmp r8b, 'A'
-        jb .skip_byte
-        cmp r8b, 'Z'
-        ja .skip_byte
-        
-      .decrypt:
-        sub byte [buffer + rcx - 1], shift_places
+      cmp rax, 0
+      je .skip_byte
+      sub byte [databuffer + rcx - 1], shift_places
+
       .skip_byte:
         loop .decrypt_byte
     
-    pop r8
+    ; Restore registers
+    pop rax
     pop rcx
     ret
 
+  ; A procedure that checks if a given character is either a lower or an upper
+  ; case letter. The condition is logically
+  ; equivalent to the following C expression:
+  ;
+  ;   (rdi >= 'a' && rdi <= 'z') || (rdi >= 'A' && rdi <= 'Z')
+  ; 
+  ; Input: rdi - the character
+  ; Output: rax - 1 if character *is* a letter, 0 otherwise
+  ; Modifies: none
+  is_letter:
+    %macro return_status 1
+      mov rax, %1
+      ret
+    %endmacro
+
+    .check_if_lowercase_letter:
+      cmp rdi, 'a'
+      jb .check_if_uppercase_letter
+      cmp rdi, 'z'
+      ja .check_if_uppercase_letter
+      return_status 1
+    
+    .check_if_uppercase_letter:
+      cmp rdi, 'A'
+      jb .return_false
+      cmp rdi, 'Z'
+      ja .return_false
+      return_status 1
+   
+   .return_false:
+      return_status 0
+
   ; A procedure that writes the buffer to stdout
   ;
-  ; Input: rbx - the amount of characters to write
+  ; Input: rdi - the amount of characters to write
   ; Output: none
   ; Modifies: none
   write_buffer:
-    ; Dump registers
+    ; Backup registers
     push rax
+    push rdx
+    push rsi
 
     ; Write buffer to stdout
     mov rax, sys_write
+    mov rdx, rdi
     mov rdi, std_out
-    mov rsi, buffer
-    mov rdx, rbx
+    mov rsi, databuffer
     syscall
 
     ; Restore registers
+    pop rsi
+    pop rdx
     pop rax
     ret
 
   ; Print the usage message
   ; Input:
-  ;   - rsi - null-terminated string which contains the name of executable
+  ;   - rdi - null-terminated string which contains the name of executable
   ; Output: none
   ; Modified: not relevant
   print_usage:
+    ; Backup registers
+    push rsi
+
+    mov rsi, rdi
     mov rdi, command_line_arguments_error
     mov rax, 0
     call printf
+
+    pop rsi
     ret
